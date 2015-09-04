@@ -7,8 +7,6 @@
   (:import org.mindrot.jbcrypt.BCrypt
            [org.bson.types ObjectId]))
 
-;(require '[clojure.data.json :as json])
-
 (defn encrypt [raw]
   (BCrypt/hashpw raw (BCrypt/gensalt 12)))
 
@@ -48,15 +46,25 @@
     ))
 
 ;HTTP server ====================================
+(defn notes [channel username password]
+  (if (verify-user username password)
+    (send! channel {:status 200
+                    :headers {"Content-Type" "text/plain"}
+                    :body (json/write-str (get-notes username))})
+    (send! channel {:status 403
+                    :headers {"Content-Type" "text/plain"}
+                    :body "Username or password is incorrect"})
+    ))
+
 (defn async-handler [req]
   (with-channel req channel
     (on-close channel (fn [status]
                         (println "Connection closed")))
-    (send! channel {:status 200
-                    :headers {"Content-Type" "text/plain"}
-                    :body (json/write-str (get-notes "jqt3of5"))})))
+    
+    (case (:uri req)
+      "/notes" (notes channel "jqt3of5" "password123")
+      )))
 
 (defn -main [& args]
-  (println (add-user "jtodd" "password123")))
-  ;(run-server async-handler {:port 8080}))
+  (run-server async-handler {:port 8080}))
 
