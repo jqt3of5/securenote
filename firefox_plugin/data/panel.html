@@ -1,0 +1,31 @@
+<html>
+  <head>
+    <link href="./bootstrap.css" rel="stylesheet"></link>
+    <link href="./panel.css" rel="stylesheet"></link>
+  </head>
+  <body>
+    <div align="center">
+      <div align="center" id="login-section">
+	<h2>SecureNote</h2>
+	<input type="text" class="fill" id="username"></input><br>
+	<input type="password" class="fill" id="password"></input><br>
+	<div align="left" class="fill">
+	  <input type="checkbox" id="savePassword">Remember</input><br>
+	</div>
+	<button type="button" class="btn btn-primary fill" id="sign-in-button">Sign In</button><br>
+	<button type="button" class="btn btn-default fill" id="forgot-password-button">Forgot Password</button>
+      </div>
+      
+      <div id="notes-section" style="display:none" align="left">
+	<span style="font-size:25px">Notes</span>
+	<div style="float:right"><button class="btn btn-primary" id="add-note-button">Add Note</button></div>
+	
+	<ul id="note-list">
+	  <li> You have no notes :( </li>
+	</ul>
+      </div>
+    </div>
+
+    <script src="./bootstrap.js"></script>
+  </body>
+</html>
