@@ -29,15 +29,17 @@
 (defn get-user [username]
   (first (strip-id (mc/find-maps db-conn "users" {:username username}))))
 
-(defn add-user
+(defn add-user-db
   "Add a user, encrypting the password using bcrypt. 
   Auth-Salt: The salt used with the original password to generate the hash used for authenticaiton.
   Enc-salt: The salt used to generate the hash for encrypting the keys for the notes"
   [username password]
   (if (nil? (get-user username))
-    (mc/insert db-conn "users" {:_id (ObjectId.) :username username :encrypted-password (encrypt password) :auth-salt (BCrypt/gensalt 10) :enc-salt (BCrypt/gensalt 10)})
+    (mc/insert db-conn "users" {:_id (ObjectId.) :username username :encrypted-password (encrypt password) :auth-salt (BCrypt/gensalt 12) :enc-salt (BCrypt/gensalt 12)})
     nil))
-
+(defn add-note-db [title text key owner]
+  (mv/insert db-conn "notes" {:_id (ObjectId.) :title title :text text :key key :username owner }))
+  
 (defn verify-user [username password]
   (let [user (get-user username)]
     (if (nil? user)
@@ -55,15 +57,44 @@
                     :headers {"Content-Type" "text/plain"}
                     :body "Username or password is incorrect"})
     ))
+(defn add-user [channel username password]
+  (if (nil? (add-user-db username password))
+    (send! channel {:status 400
+                    :headers {"Content-Type" "text/plain"}
+                    :body "User already exists"})
+    (send! channel {:status 200
+                    :headers {"Content-Type" "text/plain"}
+                    :body "Username added successfully"})))
+
+(defn add-note [channel username password note]
+  )
+  
+                
+(defn parse-query-params [querystring]
+  (if (clojure.string/blank? querystring)
+    {}
+    (reduce
+     (fn [qmap param] (assoc qmap (keyword (first param)) (last param)));convert an array of arrays of two elements to a map
+     {}
+     (map (fn [parameter] (clojure.string/split parameter #"=")) ; break up each string by the = character
+          (clojure.string/split querystring #"&")))));break up the string by the & character
 
 (defn async-handler [req]
   (with-channel req channel
     (on-close channel (fn [status]
                         (println "Connection closed")))
     
-    (case (:uri req)
-      "/notes" (notes channel "jqt3of5" "password123")
-      )))
+    (let [queryMap (parse-query-params (:query-string req))]
+      (println queryMap)
+      (case (:uri req)
+        "/" (send! channel {:status 200
+                            :headers {"Content-Type" "text/plain"}
+                            :body "Congrats! You found the server!"})
+        "/notes" (notes channel (:username queryMap) (:password queryMap))
+        "/addnote" nil
+        "/adduser" (add-user channel (:username queryMap) (:password queryMap))
+        )))
+  )
 
 (defn -main [& args]
   (run-server async-handler {:port 8080}))
