@@ -2,6 +2,7 @@ self.port.on("login-success", function() {
     document.getElementById("login-section").style.display = "none";
     document.getElementById("notes-section").style.display = "block";
 })
+
 self.port.on("setup-ui-for-notes", function(notes){
     if (notes != null && notes.length > 0)
     {
@@ -16,7 +17,6 @@ self.port.on("setup-ui-for-notes", function(notes){
 	    listItem.addEventListener("click", function(note)
 				      {
 					  return function(event){
-					      console.log(note)
 					      self.port.emit("note-selected", note)
 					  }
 				      }(notes[i]));

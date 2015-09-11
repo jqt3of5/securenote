@@ -40,7 +40,7 @@
   Enc-salt: The salt used to generate the hash for encrypting the keys for the notes"
   [username password auth-salt enc-salt]
   (if (nil? (get-user username))
-    (mc/insert db-conn "users" {:_id (ObjectId.) :username username :encrypted-password (encrypt password) :auth-salt auth-salt :enc-salt enc-salt})
+    (mc/insert db-conn "users" {:_id (ObjectId.) :username username :encrypted-password (encrypt password) :authSalt auth-salt :encSalt enc-salt})
     false))
 
 (defn add-note-db [title text key owner]
@@ -48,8 +48,8 @@
 
 (defn get-salts-db [username]
   (let [user (get-user username)
-        auth-salt (:auth-salt user)
-        enc-salt (:enc-salt user)]
+        auth-salt (:authSalt user)
+        enc-salt (:encSalt user)]
     {:authSalt auth-salt, :encSalt enc-salt}))
 
 (defn verify-user [username password]
@@ -69,9 +69,9 @@
     token))
 
 (defn save-note-db [username note]
-  (if (nil? (:id note))
+  (if (nil? (note "id"))
     (mc/insert db-conn "notes" (merge {:_id (ObjectId.) :id (str (java.util.UUID/randomUUID)) :owner username} note))
-    (mc/update db-conn "notes" {:id (:id note)} note {:multi false})
+    (mc/update db-conn "notes" {:id (note "id")} note {:multi false})
     ))
 
 

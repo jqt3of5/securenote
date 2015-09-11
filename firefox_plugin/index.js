@@ -95,8 +95,8 @@ panel.port.on("new-user-credentials-entered", function(username, password, shoul
 
 panel.port.on("add-note", function(){
     editNotePanel.show()
+    editNotePanel.port.emit("setup-for-note", null);
 });
-
 
 panel.port.on("note-selected", function(note){
     //Decrypt the note, pass it to the edit panel
@@ -108,33 +108,159 @@ panel.port.on("note-selected", function(note){
 });
 
 editNotePanel.port.on("save-note", function(note){
-    //Encrypt note
-    if (note.id == undefined)
-    {
-	//This note is new, and we need to generate a key
-	crypto.subtle.generateKey({name:"AES-CBC", length:256}, true, ["encrypt", "decrypt"])
-	    .then(function(noteKey){
-		encryptNote(note, noteKey, credentials.encPassword).then(function(encryptedNote){
+    keyForNote(note)
+	.then(function(noteKey){
+	    encryptNote(note, noteKey, credentials.encPassword)
+		.then(function(encryptedNote){
 		    saveNote(credentials.sessionToken, encryptedNote)
-		}, handleError)
+		    editNotePanel.hide()
 	    }, handleError)
-	return;
-    }
-    crypto.subtle.decrypt({"name":"AES-CBC", iv:Unibabel.hexToBuffer(note.iv)}, credentials.encPassword, Unibabel.hexToBuffer(note.key))
-	.then(function(rawkey){
-	    crypto.subtle.importKey("raw",
-				    rawkey,
-				    {name: "AES-CBC"},
-				    true,
-				    ["encrypt"])
-		.then(function(noteKey){
-		    encryptNote(note, noteKey, credentials.encPassword).then(function(encryptedNote){
-			saveNote(credentials.sessionToken, encryptedNote)
-		    })
-		}, handleError);
-	}, handleError);
+	})
 })
 
+editNotePanel.port.on("cancel-edit", function(){
+    editNotePanel.hide()
+})
+
+
+//HTTP Methods ===========================================================================================
+function login(username, authKey)
+{
+    Request({url:baseURL+"login",
+	     headers:{"username":username, "password":authKey},
+	     onComplete:(response) => {
+		 if (response.status == 200)
+		 {
+		     credentials.sessionToken = response.text
+		     panel.port.emit("login-success");
+
+		     refreshNotes(credentials.sessionToken)
+		 }
+		 else
+		 {
+		     panel.port.emit("login-failed", response.text);
+		 }
+	     }}).post()
+}
+
+function saveNote(token, note)
+{
+    Request({url:baseURL+"savenote",
+	     content:JSON.stringify(note),
+	     contentType:"text/json",
+	     headers:{"session-token":token},
+	     onComplete:(response) => {
+		 if (response.status == 200)
+		 {
+		     refreshNotes(token)
+		 }
+		 else
+		 {
+		 }
+	     }}).post()
+}
+
+function createUser(username, authKey, authSalt, encSalt)
+{
+    Request({url:baseURL+"adduser",
+	     content:JSON.stringify({username:username, password:authKey, encsalt:encSalt, authsalt:authSalt}),
+	     onComplete: (response) => {
+		 if (response.status == 200)
+		 {
+		     login(username, authKey)		     
+		 }
+		 else
+		 {
+		     panel.port.emit("login-failed", response.text)
+		 }
+	     }}).post()
+}
+
+function refreshNotes(token)
+{
+    Request({url:baseURL+"notes",
+	     headers:{"session-token": token},
+	     onComplete: (response) => {
+		 if (response.status == 200)
+		 {
+		     panel.port.emit("setup-ui-for-notes", response.json)
+		 }
+		 else
+		 {
+		     //TODO HandleHttpError
+		 }
+	     }}).get()
+}
+function getSalts(username, onComplete)
+{
+    Request({
+	url: baseURL+"getsalts",
+	content: {username:username},
+	onComplete:function(response){
+	    if (response.status == 200)
+	    {
+		onComplete(response.json)
+	    }
+	    else
+	    {
+		panel.port.emit("login-failed", response.text);
+	    }
+	}}).get();
+}
+
+//Key generation ==========================================================================================
+
+function keyForNote(note)
+{
+    if (note.key == undefined)
+    {
+	return crypto.subtle.generateKey({name:"AES-CBC", length:256}, true, ["encrypt", "decrypt"])
+	    .then(function(noteKey){
+		return noteKey;
+	    })
+    }
+    return crypto.subtle.decrypt({"name":"AES-CBC", iv:Unibabel.hexToBuffer(note.iv)}, credentials.encPassword, Unibabel.hexToBuffer(note.key))
+	.then(function(rawkey){
+	    return crypto.subtle.importKey("raw",
+					   rawkey,
+					   {name: "AES-CBC"},
+					   true,
+					   ["encrypt", "decrypt"])
+		.then(function(noteKey){
+		    return noteKey
+		})
+	})
+}
+
+
+function deriveKeyFrom(password, salt)
+{
+    return crypto.subtle.importKey("raw", 
+				   Unibabel.utf8ToBuffer(password),
+				   {name: "PBKDF2"},
+				   true,
+				   ["deriveKey"]
+				  ).then(function(key){
+				      return crypto.subtle.deriveKey({"name":'PBKDF2',
+								      "salt":salt,
+								      "iterations":1024,
+								      "hash":{name: 'SHA-1'}},
+								     key,
+								     {"name": 'AES-CBC', length:256},
+								     true,
+								     ["encrypt", "decrypt"]);
+				  }, handleError)
+}
+function deriveHexKeyFrom(password, salt)
+{
+    return deriveKeyFrom(password, salt).then(function (webKey) {
+	return crypto.subtle.exportKey("raw", webKey)
+    }, handleError).then(function (rawKey){
+	return Unibabel.bufferToHex(new Uint8Array(rawKey))
+    });
+}
+
+//Encryption ====================================================================================================
 function encryptNote(note, noteKey, masterKey)
 {
     var initVector = new Uint8Array(16)
@@ -171,6 +297,7 @@ function decryptNote(note, masterKey)
 			    note.title = Unibabel.bufferToUtf8(new Uint8Array(decryptedTitle))
 			    return crypto.subtle.decrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.hexToBuffer(note.text))
 				.then(function(decryptedText){
+				    console.log("decrypted text")
 				    note.text = Unibabel.bufferToUtf8(new Uint8Array(decryptedText))
 				    return note;
 				}, handleError)
@@ -179,119 +306,6 @@ function decryptNote(note, masterKey)
 	},handleError)
 }
 
-//HTTP Methods ===========================================================================================
-function login(username, authKey)
-{
-    Request({url:baseURL+"login",
-	     headers:{"username":username, "password":authKey},
-	     onComplete:(response) => {
-		 if (response.status == 200)
-		 {
-		     credentials.sessionToken = response.text
-		     panel.port.emit("login-success");
-
-		     getNotes(credentials.sessionToken)
-		 }
-		 else
-		 {
-		     panel.port.emit("login-failed", response.text);
-		 }
-	     }}).post()
-}
-
-function saveNote(token, note)
-{
-    Request({url:baseURL+"savenote",
-	     content:JSON.stringify(note),
-	     contentType:"text/json",
-	     headers:{"session-token":token},
-	     onComplete:(response) => {
-		 if (response.status == 200)
-		 {
-		     editNotePanel.port.emit("note-saved-success")
-		 }
-		 else
-		 {
-		     editNotePanel.port.emit("note-saved-failed")
-		 }
-	     }}).post()
-}
-
-function createUser(username, authKey, authSalt, encSalt)
-{
-    Request({url:baseURL+"adduser",
-	     content:JSON.stringify({username:username, password:authKey, encsalt:encSalt, authsalt:authSalt}),
-	     onComplete: (response) => {
-		 if (response.status == 200)
-		 {
-		     login(username, authKey)		     
-		 }
-		 else
-		 {
-		     panel.port.emit("login-failed", response.text)
-		 }
-	     }}).post()
-}
-
-//Name: getNotes
-function getNotes(token)
-{
-    Request({url:baseURL+"notes",
-	     headers:{"session-token": token},
-	     onComplete: (response) => {
-		 if (response.status == 200)
-		 {
-		     panel.port.emit("setup-ui-for-notes", response.json)
-		 }
-		 else
-		 {
-
-		 }
-	     }}).get()
-}
-function getSalts(username, onComplete)
-{
-    Request({
-	url: baseURL+"getsalts",
-	content: {username:username},
-	onComplete:function(response){
-	    if (response.status == 200)
-	    {
-		onComplete(response.json)
-	    }
-	    else
-	    {
-		panel.port.emit("login-failed", response.text);
-	    }
-	}}).get();
-}
-//Key generation ==========================================================================================
-function deriveKeyFrom(password, salt)
-{
-    return crypto.subtle.importKey("raw", 
-				   Unibabel.utf8ToBuffer(password),
-				   {name: "PBKDF2"},
-				   true,
-				   ["deriveKey"]
-				  ).then(function(key){
-				      return crypto.subtle.deriveKey({"name":'PBKDF2',
-								      "salt":salt,
-								      "iterations":1024,
-								      "hash":{name: 'SHA-1'}},
-								     key,
-								     {"name": 'AES-CBC', length:256},
-								     true,
-								     ["encrypt", "decrypt"]);
-				  }, handleError)
-}
-function deriveHexKeyFrom(password, salt)
-{
-    return deriveKeyFrom(password, salt).then(function (webKey) {
-	return crypto.subtle.exportKey("raw", webKey)
-    }, handleError).then(function (rawKey){
-	return Unibabel.bufferToHex(new Uint8Array(rawKey))
-    });
-}
 
 function handleError(error)
 {
