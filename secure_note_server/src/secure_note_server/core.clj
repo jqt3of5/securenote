@@ -71,7 +71,7 @@
 (defn save-note-db [username note]
   (if (nil? (note "id"))
     (mc/insert db-conn "notes" (merge {:_id (ObjectId.) :id (str (java.util.UUID/randomUUID)) :owner username} note))
-    (mc/update db-conn "notes" {:id (note "id")} note {:multi false})
+    (mc/update db-conn "notes" {:id (note "id")} {$set note} {:multi false})
     ))
 
 

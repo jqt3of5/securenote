@@ -85,7 +85,7 @@ panel.port.on("new-user-credentials-entered", function(username, password, shoul
     })
 
     deriveHexKeyFrom(password, authSalt).then(function(hexKey){
-	credentials.authHexKey = hexKey
+ 	credentials.authHexKey = hexKey
 	createUser(username,
 		   hexKey,
 		   Unibabel.bufferToHex(authSalt),
@@ -98,23 +98,23 @@ panel.port.on("add-note", function(){
     editNotePanel.port.emit("setup-for-note", null);
 });
 
+panel.port.on("delete-note", function(note){
+    panel.port.emit("delete-note", note)
+})
+
 panel.port.on("note-selected", function(note){
     //Decrypt the note, pass it to the edit panel
-    decryptNote(note, credentials.encPassword)
-	.then(function(decryptedNote){
-	    editNotePanel.show()
-	    editNotePanel.port.emit("setup-for-note", decryptedNote);
-	}, handleError)
+    editNotePanel.show()
+    editNotePanel.port.emit("setup-for-note", note);
 });
-
+panel.port.on("logout", function() {
+    credentials = {}
+})
 editNotePanel.port.on("save-note", function(note){
-    keyForNote(note)
-	.then(function(noteKey){
-	    encryptNote(note, noteKey, credentials.encPassword)
-		.then(function(encryptedNote){
-		    saveNote(credentials.sessionToken, encryptedNote)
-		    editNotePanel.hide()
-	    }, handleError)
+    encryptNote(note, credentials.encPassword)
+	.then(function(encryptedNote){
+	    saveNote(credentials.sessionToken, encryptedNote)
+	    editNotePanel.hide()
 	})
 })
 
@@ -156,6 +156,7 @@ function saveNote(token, note)
 		 }
 		 else
 		 {
+		     //HTTP Error
 		 }
 	     }}).post()
 }
@@ -183,7 +184,19 @@ function refreshNotes(token)
 	     onComplete: (response) => {
 		 if (response.status == 200)
 		 {
-		     panel.port.emit("setup-ui-for-notes", response.json)
+		     var decryptedNotes = []
+		     var notes = response.json
+		     for (var i in notes)
+		     {
+			 decryptNote(notes[i], credentials.encPassword)
+			     .then(function(note){
+				 decryptedNotes.push(note)
+				 if (decryptedNotes.length == notes.length)
+				 {
+				     panel.port.emit("setup-ui-for-notes", decryptedNotes)			     
+				 }
+			     })
+		     }
 		 }
 		 else
 		 {
@@ -210,16 +223,17 @@ function getSalts(username, onComplete)
 
 //Key generation ==========================================================================================
 
-function keyForNote(note)
+function createNoteKey()
 {
-    if (note.key == undefined)
-    {
-	return crypto.subtle.generateKey({name:"AES-CBC", length:256}, true, ["encrypt", "decrypt"])
-	    .then(function(noteKey){
-		return noteKey;
-	    })
-    }
-    return crypto.subtle.decrypt({"name":"AES-CBC", iv:Unibabel.hexToBuffer(note.iv)}, credentials.encPassword, Unibabel.hexToBuffer(note.key))
+    return crypto.subtle.generateKey({name:"AES-CBC", length:256}, true, ["encrypt", "decrypt"])
+	.then(function(noteKey){
+	    return noteKey;
+	})
+}
+
+function decryptNoteKey(encryptedNoteKey, masterKey)
+{
+    return crypto.subtle.decrypt({"name":"AES-CBC", iv:Unibabel.hexToBuffer(encryptedNoteKey.iv)}, masterKey, Unibabel.hexToBuffer(encryptedNoteKey.data))
 	.then(function(rawkey){
 	    return crypto.subtle.importKey("raw",
 					   rawkey,
@@ -231,7 +245,6 @@ function keyForNote(note)
 		})
 	})
 }
-
 
 function deriveKeyFrom(password, salt)
 {
@@ -261,46 +274,78 @@ function deriveHexKeyFrom(password, salt)
 }
 
 //Encryption ====================================================================================================
-function encryptNote(note, noteKey, masterKey)
+var plaintextProperties = ["key", "id", "owner"]
+
+function encryptNote(note, masterKey)
+{
+    if (note.key == undefined)
+    {
+	var initVector = new Uint8Array(16)
+	crypto.getRandomValues(initVector)
+	return createNoteKey()
+	    .then(function(noteKey){
+		return crypto.subtle.exportKey("raw", noteKey)
+		    .then(function(rawKey){
+			return crypto.subtle.encrypt({name:"AES-CBC",iv:initVector}, masterKey, rawKey)
+			    .then(function(encryptedKey){
+				note.key = {}
+				note.key.data = Unibabel.bufferToHex(new Uint8Array(encryptedKey))
+				note.key.iv = Unibabel.bufferToHex(new Uint8Array(initVector))
+				return _encryptNote(note, noteKey)
+			    })
+		    })
+	    })
+    }
+    else
+    {
+	return decryptNoteKey(note.key, masterKey)
+	    .then(function(noteKey){
+		return _encryptNote(note, noteKey)
+	    })
+    }
+}
+
+function _encryptNote(note, noteKey)
 {
     var initVector = new Uint8Array(16)
     crypto.getRandomValues(initVector)
-    note.iv = Unibabel.bufferToHex(initVector)
+
+    var encryptedNote = {}
+
+    for (var i in plaintextProperties)
+    {
+	var prop = plaintextProperties[i]
+	encryptedNote[prop] = note[prop]
+	note[prop] = undefined
+    }
     
-    return crypto.subtle.exportKey("raw", noteKey)
-	.then(function(rawKey){
-	    return crypto.subtle.encrypt({name:"AES-CBC",iv:initVector}, masterKey, rawKey)
-		.then(function(encryptedKey){
-		    note.key = Unibabel.bufferToHex(new Uint8Array(encryptedKey))
-		    return crypto.subtle.encrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.utf8ToBuffer(note.title))
-			.then(function(encryptedTitle){
-			    note.title = Unibabel.bufferToHex(new Uint8Array(encryptedTitle))
-			    return crypto.subtle.encrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.utf8ToBuffer(note.text))
-				.then(function(encryptedText){
-				    note.text = Unibabel.bufferToHex(new Uint8Array(encryptedText))
-				    return note;
-				}, handleError)
-			}, handleError)
-		}, handleError)
+    encryptedNote.iv = Unibabel.bufferToHex(new Uint8Array(initVector))
+    
+    var noteData = JSON.stringify(note)
+    return crypto.subtle.encrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.utf8ToBuffer(noteData))
+	.then(function(encryptedNoteData){
+	    encryptedNote.data = Unibabel.bufferToHex(new Uint8Array(encryptedNoteData))
+	    return encryptedNote;
 	}, handleError)
 }
 
-function decryptNote(note, masterKey)
+function decryptNote(encryptedNote, masterKey)
 {
-    var initVector = Unibabel.hexToBuffer(note.iv)
-    return crypto.subtle.decrypt({name:"AES-CBC", iv:initVector}, masterKey, Unibabel.hexToBuffer(note.key))
+    var keyInitVector = Unibabel.hexToBuffer(encryptedNote.key.iv)
+    return crypto.subtle.decrypt({name:"AES-CBC", iv:keyInitVector}, masterKey, Unibabel.hexToBuffer(encryptedNote.key.data))
 	.then(function(rawKey){
 	    return crypto.subtle.importKey("raw", rawKey,{name: "AES-CBC", length:256}, true, ["encrypt", "decrypt"])
 		.then(function(noteKey){
-		    return crypto.subtle.decrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.hexToBuffer(note.title))
-			.then(function(decryptedTitle){
-			    note.title = Unibabel.bufferToUtf8(new Uint8Array(decryptedTitle))
-			    return crypto.subtle.decrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.hexToBuffer(note.text))
-				.then(function(decryptedText){
-				    console.log("decrypted text")
-				    note.text = Unibabel.bufferToUtf8(new Uint8Array(decryptedText))
-				    return note;
-				}, handleError)
+		    var initVector = Unibabel.hexToBuffer(encryptedNote.iv)
+		    return crypto.subtle.decrypt({name:"AES-CBC", iv:initVector}, noteKey, Unibabel.hexToBuffer(encryptedNote.data))
+			.then(function(decryptedNoteData){
+			    var note = JSON.parse(Unibabel.bufferToUtf8(new Uint8Array(decryptedNoteData)))
+			    for (var i in plaintextProperties)
+			    {
+				var prop = plaintextProperties[i]
+				note[prop] = encryptedNote[prop]
+			    }
+			    return note
 			}, handleError)
 		},handleError)
 	},handleError)
@@ -311,6 +356,7 @@ function handleError(error)
 {
     console.log(error)
     console.log(error.message);
+    console.log(error.stack)
     panel.port.emit("login-failed", error.message);
 }
 
