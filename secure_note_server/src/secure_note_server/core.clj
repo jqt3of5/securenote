@@ -26,6 +26,12 @@
 (defn get-notes [username]
   (strip-id (mc/find-maps db-conn "notes" {:owner username})))
 
+(defn does-note-belong-to-user [noteid username]
+  (not (nil? (mc/find-maps db-conn "notes" {:owner username, :id noteid}))))
+
+(defn delete-note-db [noteid]
+  (mc/remove db-conn "notes" {:noteid noteid}))
+
 (defn get-shared-notes [username]
   (strip-id (mc/find-maps db-conn "shared-notes" {:username username})))
 
@@ -108,6 +114,11 @@
     (send! channel {:status 200
                     :headers {"Content-Type" "text/json"}
                     :body "Note Saved"})))
+(defn delete-note [channel username noteid]
+  (if (does-note-belong-to-user username noteid)
+    (do     (println (clojure.string/join ["note: " noteid " belongs to: " username]))
+            (delete-note-db noteid))
+    (println (clojure.string/join ["note: " noteid " does not belong to: " username]))))
 
 (defn get-salts [channel username]
   (if (nil? (get-user username))
@@ -132,7 +143,8 @@
 (defn secure-route [uri username body channel]
   (case uri
     "/savenote" (save-note channel username body)
-    "/notes" (notes channel username)))
+    "/notes" (notes channel username)
+    "/deletenote" (delete-note channel username body)))
 
 (defn route [uri headers body query channel]
     (case uri
@@ -143,8 +155,7 @@
       "/getsalts" (get-salts channel (:username query))
       "/login" (login channel (headers "username") (headers "password"))
 
-                                        ;Secured endpoints
-
+      ;Default Check Secured endpoints
       (if (verify-token (headers "session-token"))
         (let [user (get-user-by-token (headers "session-token"))]
           (secure-route uri (:username user) body channel))

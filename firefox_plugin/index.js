@@ -99,7 +99,7 @@ panel.port.on("add-note", function(){
 });
 
 panel.port.on("delete-note", function(note){
-    panel.port.emit("delete-note", note)
+    deleteNote(credentials.sessionToken, note)
 })
 
 panel.port.on("note-selected", function(note){
@@ -124,6 +124,16 @@ editNotePanel.port.on("cancel-edit", function(){
 
 
 //HTTP Methods ===========================================================================================
+function deleteNote(token, note)
+{
+    Request({url:baseURL+"deletenote",
+	     content:note.id,
+	     contentType:"text/json",
+	     headers:{"session-token":token},
+	     onComplete:(response) => {
+		 panel.port.emit("delete-note", note)
+	     }}).post()
+}
 function login(username, authKey)
 {
     Request({url:baseURL+"login",
@@ -222,7 +232,6 @@ function getSalts(username, onComplete)
 }
 
 //Key generation ==========================================================================================
-
 function createNoteKey()
 {
     return crypto.subtle.generateKey({name:"AES-CBC", length:256}, true, ["encrypt", "decrypt"])
