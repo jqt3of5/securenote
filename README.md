@@ -1,7 +1,7 @@
 SecureNote
 ======
 
-SecureNote is a Firefox plugin meant to store notes remotely in a host proof way. Gauranteeing that you'll have access to your notes where ever you are, while giving you piece of mind. It uses clojure for the back end. 
+SecureNote is a Firefox plugin meant to store notes remotely in a host proof way. Gauranteeing that you'll have access to your notes where ever you are, while giving you piece of mind. It uses clojure and MongoDB for the back end. 
 
 Instalation
 ------
@@ -15,7 +15,10 @@ Instalation
    > jpm run
 
 2. Secure Server
-
+   First install MongoDB, and change the configuration to point to your installed server. 
+   ***Warning***
+   The current status of the code only supports database without a password, located on localhost. This should be a pretty easy thing to change, but if your configuration is different (As it should be), you'll have to make a code change. 
+   
    The best way to compile and run the server is with leiningen. Which can be downloaded from [https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein](github)
 
    Then execute the command, which will install all of the dependancies as well
