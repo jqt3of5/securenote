@@ -146,23 +146,44 @@
     "/notes" (notes channel username)
     "/deletenote" (delete-note channel username body)))
 
+(defn not-authorized [channel]
+  (send! channel {:status 401
+                  :headers {"Content-Type" "text/plain"}
+                  :body "Not Authorized"}))
+
+(defn secured-endpoint [headers channel end-point]
+  (let [token (headers "session-token")
+        username (headers "username")
+        password (headers "password")]
+        (if (not (nil? token))
+          (if (verify-token token)
+            (let [user (get-user-by-token (headers "session-token"))]
+              (end-point user))
+            (not-authorized))
+          (if (verify-user username password)
+            (end-point username)
+            (not-authorized)))))
+
+(defmacro secure [headers func]
+  (secured-endpoint headers (fn [username] func)))
+             
 (defn route [uri headers body query channel]
     (case uri
       "/" (send! channel {:status 200
                           :headers {"Content-Type" "text/plain"}
                           :body "Congrats! You found the server!"})
+      ;Unsecured Endpoints
       "/adduser" (add-user channel (body "username") (body "password") (body "authsalt") (body "encsalt") )
       "/getsalts" (get-salts channel (:username query))
       "/login" (login channel (headers "username") (headers "password"))
-
-      ;Default Check Secured endpoints
-      (if (verify-token (headers "session-token"))
-        (let [user (get-user-by-token (headers "session-token"))]
-          (secure-route uri (:username user) body channel))
-        (send! channel {:status 401
+      ;Secured Endpoints
+      "/savenote" (secure headers (save-note channel username body))
+      "/notes" (secure headers (notes channel username))
+      "/deletenote" (secure headers (delete-note channel username body))
+      ;Endpoint doesn't exist
+      (send! channel {:status 404
                         :headers {"Content-Type" "text/plain"}
-                        :body "Not Authorized"}))
-    ))
+                        :body "Not Found"})))
 
 (defn async-handler [req]
   (with-channel req channel
