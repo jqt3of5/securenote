@@ -146,11 +146,6 @@
     "/notes" (notes channel username)
     "/deletenote" (delete-note channel username body)))
 
-(defn not-authorized [channel]
-  (send! channel {:status 401
-                  :headers {"Content-Type" "text/plain"}
-                  :body "Not Authorized"}))
-
 (defn secured-endpoint [headers channel end-point]
   (let [token (headers "session-token")
         username (headers "username")
@@ -159,10 +154,15 @@
           (if (verify-token token)
             (let [user (get-user-by-token (headers "session-token"))]
               (end-point user))
-            (not-authorized))
+            (send! channel {:status 401
+                            :headers {"Content-Type" "text/plain"}
+                            :body "Not Authorized"}))
           (if (verify-user username password)
             (end-point username)
-            (not-authorized)))))
+            (send! channel {:status 403
+                            :headers {"Content-Type" "text/plain"}
+                            :body "Incorrect username or password"})
+            ))))
 
 (defmacro secure [headers func]
   (secured-endpoint headers (fn [username] func)))
